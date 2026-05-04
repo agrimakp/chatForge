@@ -20,20 +20,28 @@ const port = process.env.PORT || 3000;
 app.get("/", (req: Request, res: Response) => {
   res.send(process.env.OPENAI_API_KEY);
 });
+
 app.get("/api/hello", (req: Request, res: Response) => {
   res.json({ message: "Hello, world!" });
 });
 
+let previousResponseId: string | null = null;
+
 // recieving prompt from user
 app.post("/api/chat", async (req: Request, res: Response) => {
   const { prompt } = req.body;
+  console.log(previousResponseId);
   const response = await client.responses.create({
-    //model: "gpt-4o-mini",
-    model: "gpt-oss:20b-cloud",
+    model: "gpt-5.4-nano",
+    // model: "gpt-oss:20b-cloud",
     input: prompt,
     temperature: 0.3,
     max_output_tokens: 100,
+    previous_response_id: previousResponseId,
   });
+  previousResponseId = response.id;
+  console.log(response.output_text);
+  console.log(previousResponseId);
   res.json({ message: response.output_text });
 });
 
