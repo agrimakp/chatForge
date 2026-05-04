@@ -1,2 +1,2 @@
-npx lint-staged
-npm run format
+bunx lint-staged
+bunx run pretty-quick
