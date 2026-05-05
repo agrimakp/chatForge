@@ -1,26 +1,18 @@
 import express from "express";
 import type { Request, Response } from "express";
 import dotenv from "dotenv";
-import { chatController } from "./controllers/chat.controller";
+import router from "./routes";
 dotenv.config();
-
+// setting up app middleware
 const app = express();
 app.use(express.json());
-const port = process.env.PORT || 3000;
+app.use(router);
 
-// define route and route handler
+// initialize port
+const port = process.env.PORT || 3000;
 
 app.get("/", (req: Request, res: Response) => {
   res.send(process.env.OPENAI_API_KEY);
-});
-
-app.get("/api/hello", (req: Request, res: Response) => {
-  res.json({ message: "Hello, world!" });
-});
-
-// recieving prompt from user
-app.post("/api/chat", async (req: Request, res: Response) => {
-  chatController.sendMessage(req, res);
 });
 
 // start the server
