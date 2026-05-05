@@ -2,6 +2,7 @@ import express from "express";
 import type { Request, Response } from "express";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import { z } from "zod";
 
 dotenv.config();
 
@@ -25,23 +26,34 @@ app.get("/api/hello", (req: Request, res: Response) => {
   res.json({ message: "Hello, world!" });
 });
 
-let previousResponseId: string | null = null;
+let conversations = new Map<string, string>();
 
+const conversationSchema = z.object({
+  prompt: z
+    .string()
+    .trim()
+    .min(1, "prompt is required")
+    .max(1000, "prompt is too long"),
+  conversationId: z.string().uuid(),
+});
 // recieving prompt from user
 app.post("/api/chat", async (req: Request, res: Response) => {
-  const { prompt } = req.body;
-  console.log(previousResponseId);
+  //validate incomming data using zod
+  const { success, error } = conversationSchema.safeParse(req.body);
+  if (!success) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  const { prompt, conversationId } = req.body;
   const response = await client.responses.create({
     model: "gpt-5.4-nano",
     // model: "gpt-oss:20b-cloud",
     input: prompt,
     temperature: 0.3,
     max_output_tokens: 100,
-    previous_response_id: previousResponseId,
+    previous_response_id: conversations.get(conversationId),
   });
-  previousResponseId = response.id;
-  console.log(response.output_text);
-  console.log(previousResponseId);
+  conversations.set(conversationId, response.id);
   res.json({ message: response.output_text });
 });
 
