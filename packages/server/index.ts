@@ -43,18 +43,22 @@ app.post("/api/chat", async (req: Request, res: Response) => {
   if (!success) {
     return res.status(400).json({ error: error.message });
   }
-
-  const { prompt, conversationId } = req.body;
-  const response = await client.responses.create({
-    model: "gpt-5.4-nano",
-    // model: "gpt-oss:20b-cloud",
-    input: prompt,
-    temperature: 0.3,
-    max_output_tokens: 100,
-    previous_response_id: conversations.get(conversationId),
-  });
-  conversations.set(conversationId, response.id);
-  res.json({ message: response.output_text });
+  try {
+    const { prompt, conversationId } = req.body;
+    const response = await client.responses.create({
+      model: "gpt-5.4-nano",
+      // model: "gpt-oss:20b-cloud",
+      input: prompt,
+      temperature: 0.3,
+      max_output_tokens: 100,
+      previous_response_id: conversations.get(conversationId),
+    });
+    conversations.set(conversationId, response.id);
+    res.json({ message: response.output_text });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // start the server
