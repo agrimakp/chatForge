@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import dotenv from "dotenv";
 import router from "./routes";
 dotenv.config();
+
 // setting up app middleware
 const app = express();
 app.use(express.json());
