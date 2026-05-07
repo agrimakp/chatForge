@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
+import { Plus, Send, MessageSquare, User, Sparkles } from "lucide-react";
 
 type ChatMessage = {
   id: string;
@@ -7,19 +8,53 @@ type ChatMessage = {
   text: string;
 };
 
+type Conversation = {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+};
+
 function App() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>(() => [
+    {
+      id: crypto.randomUUID(),
+      title: "New chat",
+      messages: [],
+    },
+  ]);
+  const [activeId, setActiveId] = useState<string>(
+    () => conversations[0]?.id ?? "",
+  );
   const [prompt, setPrompt] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
 
-  const conversationId = useMemo(() => crypto.randomUUID(), []);
+  const activeConversation = useMemo(
+    () => conversations.find((c) => c.id === activeId),
+    [conversations, activeId],
+  );
+  const messages = activeConversation?.messages ?? [];
+
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, isSending]);
+
+  const handleNewChat = () => {
+    const newId = crypto.randomUUID();
+    setConversations((prev) => [
+      { id: newId, title: "New chat", messages: [] },
+      ...prev,
+    ]);
+    setActiveId(newId);
+    setError("");
+    setPrompt("");
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedPrompt = prompt.trim();
-
-    if (!trimmedPrompt || isSending) {
+    if (!trimmedPrompt || isSending || !activeId) {
       return;
     }
 
@@ -29,7 +64,18 @@ function App() {
       text: trimmedPrompt,
     };
 
-    setMessages((previous) => [...previous, userMessage]);
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === activeId
+          ? {
+              ...c,
+              title:
+                c.messages.length === 0 ? trimmedPrompt.slice(0, 40) : c.title,
+              messages: [...c.messages, userMessage],
+            }
+          : c,
+      ),
+    );
     setPrompt("");
     setError("");
     setIsSending(true);
@@ -37,12 +83,10 @@ function App() {
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: trimmedPrompt,
-          conversationId,
+          conversationId: activeId,
         }),
       });
 
@@ -52,14 +96,23 @@ function App() {
 
       const data = (await response.json()) as { message?: string };
 
-      setMessages((previous) => [
-        ...previous,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: data.message ?? "No response received.",
-        },
-      ]);
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeId
+            ? {
+                ...c,
+                messages: [
+                  ...c.messages,
+                  {
+                    id: crypto.randomUUID(),
+                    role: "assistant",
+                    text: data.message ?? "No response received.",
+                  },
+                ],
+              }
+            : c,
+        ),
+      );
     } catch (requestError) {
       setError("Unable to send message. Make sure the server is running.");
       console.error(requestError);
@@ -68,71 +121,169 @@ function App() {
     }
   };
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      const form = event.currentTarget.form;
+      form?.requestSubmit();
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background to-muted/30 p-4 md:p-6">
-      <div className="flex h-[calc(100vh-2rem)] w-full flex-col rounded-2xl border border-border/70 bg-card/90 p-4 shadow-xl backdrop-blur-sm md:h-[calc(100vh-3rem)] md:p-6">
-        <header className="mb-5 border-b border-border/70 pb-4">
-          <p className="mb-2 w-fit rounded-full bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-wide text-primary">
-            AI Assistant
+    <div className="flex h-screen w-screen overflow-hidden bg-white text-neutral-900">
+      <aside className="hidden w-64 shrink-0 flex-col bg-neutral-950 text-neutral-100 md:flex">
+        <div className="p-3">
+          <button
+            onClick={handleNewChat}
+            className="flex w-full items-center gap-2 rounded-lg border border-neutral-700/70 bg-transparent px-3 py-2 text-sm font-medium transition hover:bg-neutral-800"
+          >
+            <Plus className="size-4" />
+            New chat
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-2 pb-2">
+          <p className="px-2 pb-2 pt-1 text-xs font-medium uppercase tracking-wide text-neutral-500">
+            Chats
           </p>
-          <h1 className="text-2xl font-semibold md:text-3xl">ChatForge</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Start a conversation with your AI assistant.
-          </p>
+          <ul className="space-y-1">
+            {conversations.map((c) => (
+              <li key={c.id}>
+                <button
+                  onClick={() => setActiveId(c.id)}
+                  className={`flex w-full items-center gap-2 truncate rounded-lg px-3 py-2 text-left text-sm transition ${
+                    c.id === activeId
+                      ? "bg-neutral-800 text-white"
+                      : "text-neutral-300 hover:bg-neutral-800/60"
+                  }`}
+                >
+                  <MessageSquare className="size-4 shrink-0 opacity-70" />
+                  <span className="truncate">{c.title || "New chat"}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="border-t border-neutral-800 p-3">
+          <div className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm text-neutral-300">
+            <div className="flex size-7 items-center justify-center rounded-full bg-neutral-700 text-xs font-medium text-white">
+              U
+            </div>
+            <span className="truncate">You</span>
+          </div>
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-200 px-4 md:px-6">
+          <div className="flex items-center gap-2">
+            <Sparkles className="size-5 text-neutral-700" />
+            <h1 className="text-base font-semibold">ChatForge</h1>
+          </div>
+          <button
+            onClick={handleNewChat}
+            className="rounded-lg p-2 text-neutral-600 transition hover:bg-neutral-100 md:hidden"
+            aria-label="New chat"
+          >
+            <Plus className="size-5" />
+          </button>
         </header>
 
-        <main className="mb-4 flex flex-1 flex-col gap-3 overflow-y-auto rounded-xl border border-border/60 bg-background/50 p-4">
+        <main className="flex-1 overflow-y-auto">
           {messages.length === 0 ? (
-            <div className="m-auto max-w-sm rounded-lg border border-dashed border-border/70 bg-muted/30 px-4 py-6 text-center">
-              <p className="text-sm text-muted-foreground">
-                Your chat will appear here. Send a message to begin.
+            <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center px-4 text-center">
+              <div className="mb-4 flex size-12 items-center justify-center rounded-full bg-neutral-100">
+                <Sparkles className="size-6 text-neutral-700" />
+              </div>
+              <h2 className="text-2xl font-semibold tracking-tight">
+                How can I help you today?
+              </h2>
+              <p className="mt-2 text-sm text-neutral-500">
+                Ask anything and I'll do my best to help.
               </p>
             </div>
           ) : (
-            messages.map((message) => (
-              <div
-                key={message.id}
-                className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
-                  message.role === "user"
-                    ? "ml-auto bg-primary text-primary-foreground"
-                    : "mr-auto border border-border/60 bg-muted/70"
-                }`}
-              >
-                {message.text}
-              </div>
-            ))
-          )}
-          {isSending && (
-            <div className="mr-auto flex w-fit items-center gap-1.5 rounded-2xl border border-border/60 bg-muted/70 px-4 py-3 shadow-sm">
-              <span className="size-1.5 animate-bounce rounded-full bg-foreground [animation-delay:-0.3s]" />
-              <span className="size-1.5 animate-bounce rounded-full bg-foreground [animation-delay:-0.15s]" />
-              <span className="size-1.5 animate-bounce rounded-full bg-foreground" />
+            <div className="mx-auto max-w-3xl px-4 py-6 md:px-6">
+              {messages.map((message) => (
+                <div key={message.id} className="mb-6 flex gap-3">
+                  <div
+                    className={`flex size-8 shrink-0 items-center justify-center rounded-full ${
+                      message.role === "user"
+                        ? "bg-neutral-800 text-white"
+                        : "bg-emerald-100 text-emerald-700"
+                    }`}
+                  >
+                    {message.role === "user" ? (
+                      <User className="size-4" />
+                    ) : (
+                      <Sparkles className="size-4" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 pt-1">
+                    <p className="mb-1 text-xs font-medium text-neutral-500">
+                      {message.role === "user" ? "You" : "ChatForge"}
+                    </p>
+                    <div className="whitespace-pre-wrap text-[15px] leading-relaxed text-neutral-900">
+                      {message.text}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {isSending && (
+                <div className="mb-6 flex gap-3">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                    <Sparkles className="size-4" />
+                  </div>
+                  <div className="min-w-0 flex-1 pt-1">
+                    <p className="mb-1 text-xs font-medium text-neutral-500">
+                      ChatForge
+                    </p>
+                    <div className="flex items-center gap-1.5 py-2">
+                      <span className="size-2 animate-bounce rounded-full bg-neutral-400 [animation-delay:-0.3s]" />
+                      <span className="size-2 animate-bounce rounded-full bg-neutral-400 [animation-delay:-0.15s]" />
+                      <span className="size-2 animate-bounce rounded-full bg-neutral-400" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
             </div>
           )}
         </main>
 
-        <form
-          onSubmit={handleSubmit}
-          className="rounded-xl border border-border/60 bg-background/80 p-3"
-        >
-          <textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Type your message..."
-            className="min-h-24 w-full resize-none rounded-lg border border-border/70 bg-background p-3 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-            disabled={isSending}
-          />
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <p className="text-sm text-destructive">{error}</p>
-            <button
-              type="submit"
-              disabled={isSending || !prompt.trim()}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        <div className="shrink-0 border-t border-neutral-200 bg-white">
+          <div className="mx-auto max-w-3xl px-4 py-4 md:px-6">
+            {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
+            <form
+              onSubmit={handleSubmit}
+              className="flex items-end gap-2 rounded-2xl border border-neutral-300 bg-white p-2 shadow-sm transition focus-within:border-neutral-400 focus-within:shadow-md"
             >
-              {isSending ? "Sending..." : "Send"}
-            </button>
+              <textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Message ChatForge..."
+                rows={1}
+                className="max-h-48 min-h-10 flex-1 resize-none bg-transparent px-3 py-2 text-[15px] leading-relaxed text-neutral-900 placeholder:text-neutral-400 focus:outline-none"
+                disabled={isSending}
+              />
+              <button
+                type="submit"
+                disabled={isSending || !prompt.trim()}
+                className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-neutral-900 text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
+                aria-label="Send message"
+              >
+                <Send className="size-4" />
+              </button>
+            </form>
+            <p className="mt-2 text-center text-xs text-neutral-400">
+              ChatForge can make mistakes. Verify important info.
+            </p>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );
