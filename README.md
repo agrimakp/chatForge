@@ -1,17 +1,29 @@
 # ChatForge
 
-ChatForge is a full-stack AI chat application built with **Bun**, **Express**, **React**, and the **OpenAI SDK**. It provides a clean ChatGPT-style interface backed by a simple HTTP API for sending prompts and continuing multi-turn conversations using a `conversationId`, with request validation via Zod and in-memory conversation state management.
+ChatForge is a full-stack AI chat application built with **Bun**, **Express**, **React**, and the **OpenAI SDK**. It pairs a polished ChatGPT-style chat interface with a clean HTTP API for multi-turn conversations, giving you both a ready-to-use product and a well-structured backend to build on.
 
-The project is organized as a Bun workspace with two packages and a clean layered backend structure (routes → controller → service → repository), making it easy to extend with persistence, authentication, or additional chat features.
+The project is organized as a Bun workspace with two first-class packages — a React frontend and an Express API — and a clean layered backend structure (routes → controller → service → repository), making it easy to extend with persistence, authentication, or additional chat features.
 
 ## Features
 
-- ChatGPT-style UI with sidebar, conversation history, and pinned composer
+### User Interface
+
+- ChatGPT-style layout with a dark sidebar and centered chat column
+- Conversation history list with auto-titled chats and a "New chat" button
+- Pinned composer with Enter-to-send and Shift+Enter for newlines
+- Animated typing indicator while waiting for responses
+- Rich markdown rendering for assistant replies (headings, lists, code, tables, links, blockquotes)
+- Auto-scroll to the latest message
+- Responsive layout (sidebar collapses on mobile)
+- Tailwind CSS styling and `lucide-react` icons
+
+### Backend
+
 - Multi-turn conversations with per-chat `conversationId`
 - Server-side prompt validation with Zod
-- Markdown rendering for assistant replies (headings, lists, code, tables, links)
-- Animated typing indicator while waiting for responses
-- Tailwind CSS styling and `lucide-react` icons
+- Layered architecture (routes → controller → service → repository)
+- In-memory conversation state (easy to swap for a database)
+- OpenAI-compatible LLM client (works with OpenAI or any compatible provider)
 
 ## Project Structure
 
@@ -20,16 +32,16 @@ chatForge/
 ├── index.ts                  # Runs server + client concurrently
 ├── package.json              # Root workspace config
 └── packages/
-    ├── server/               # Bun + Express API
-    │   ├── index.ts
-    │   ├── routes.ts
-    │   ├── controllers/
-    │   ├── services/
-    │   └── repositories/
-    └── client/               # Vite + React frontend
-        ├── index.html
-        └── src/
-            └── App.tsx
+    ├── client/               # Vite + React frontend
+    │   ├── index.html
+    │   └── src/
+    │       └── App.tsx
+    └── server/               # Bun + Express API
+        ├── index.ts
+        ├── routes.ts
+        ├── controllers/
+        ├── services/
+        └── repositories/
 ```
 
 ## Prerequisites
@@ -63,17 +75,52 @@ bun run dev
 
 This launches:
 
-- **Server** on [http://localhost:3000](http://localhost:3000)
 - **Client** on [http://localhost:5173](http://localhost:5173) (proxied to the server's `/api` routes)
+- **Server** on [http://localhost:3000](http://localhost:3000)
 
 You can also run each package individually:
 
 ```bash
-bun --cwd packages/server run dev
 bun --cwd packages/client run dev
+bun --cwd packages/server run dev
 ```
 
+## Frontend
+
+The frontend lives in `packages/client/` and is a Vite + React 19 app styled with Tailwind CSS.
+
+### Key components
+
+- **`App.tsx`** — top-level chat shell. Owns conversation state, sidebar, composer, and message rendering.
+- **`Markdown`** — wraps `react-markdown` with `remark-gfm` and Tailwind styles for headings, lists, code blocks, tables, and links.
+
+### Conversation model
+
+Each conversation is held client-side as:
+
+```ts
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+};
+
+type Conversation = {
+  id: string; // UUID — sent to the API as conversationId
+  title: string; // auto-generated from the first user message
+  messages: ChatMessage[];
+};
+```
+
+Clicking **New chat** generates a fresh `conversationId`, which the backend uses to scope LLM context per chat.
+
+### Dev proxy
+
+Vite proxies `/api/*` to the server in `packages/client/vite.config.ts`, so the frontend can call the API with relative URLs without CORS configuration.
+
 ## API
+
+The API lives in `packages/server/` and is built with Express on Bun.
 
 ### `POST /api/chat`
 
@@ -98,9 +145,17 @@ Send a prompt and receive an assistant reply.
 
 Conversation context is preserved across requests sharing the same `conversationId`.
 
+### `GET /api/hello`
+
+Simple health-check endpoint.
+
+```json
+{ "message": "Hello, world!" }
+```
+
 ## Tech Stack
 
 - **Runtime:** Bun
+- **Frontend:** React 19, Vite, Tailwind CSS, react-markdown, remark-gfm, lucide-react
 - **Backend:** Express, OpenAI SDK, Zod, dotenv
-- **Frontend:** React 19, Vite, TailwindCSS, react-markdown, remark-gfm, lucide-react
 - **Tooling:** Prettier, Husky, lint-staged
