@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { Plus, Send, MessageSquare, User, Sparkles } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type ChatMessage = {
   id: string;
@@ -13,6 +15,113 @@ type Conversation = {
   title: string;
   messages: ChatMessage[];
 };
+
+function Markdown({ content }: { content: string }) {
+  return (
+    <div className="text-[15px] leading-relaxed text-neutral-900">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => (
+            <h1 className="mb-3 mt-4 text-2xl font-semibold tracking-tight">
+              {children}
+            </h1>
+          ),
+          h2: ({ children }) => (
+            <h2 className="mb-2 mt-4 text-xl font-semibold tracking-tight">
+              {children}
+            </h2>
+          ),
+          h3: ({ children }) => (
+            <h3 className="mb-2 mt-3 text-lg font-semibold tracking-tight">
+              {children}
+            </h3>
+          ),
+          p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+          ul: ({ children }) => (
+            <ul className="mb-3 list-disc space-y-1 pl-6 last:mb-0">
+              {children}
+            </ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="mb-3 list-decimal space-y-1 pl-6 last:mb-0">
+              {children}
+            </ol>
+          ),
+          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="text-emerald-700 underline underline-offset-2 hover:text-emerald-800"
+            >
+              {children}
+            </a>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote className="mb-3 border-l-4 border-neutral-200 pl-4 italic text-neutral-700 last:mb-0">
+              {children}
+            </blockquote>
+          ),
+          hr: () => <hr className="my-4 border-neutral-200" />,
+          strong: ({ children }) => (
+            <strong className="font-semibold">{children}</strong>
+          ),
+          em: ({ children }) => <em className="italic">{children}</em>,
+          code: ({ className, children, ...props }) => {
+            const isInline = !className;
+            if (isInline) {
+              return (
+                <code
+                  className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-[0.85em] text-neutral-800"
+                  {...props}
+                >
+                  {children}
+                </code>
+              );
+            }
+            return (
+              <code
+                className={`font-mono text-[0.9em] ${className ?? ""}`}
+                {...props}
+              >
+                {children}
+              </code>
+            );
+          },
+          pre: ({ children }) => (
+            <pre className="mb-3 overflow-x-auto rounded-lg bg-neutral-900 p-4 text-[13px] leading-relaxed text-neutral-100 last:mb-0">
+              {children}
+            </pre>
+          ),
+          table: ({ children }) => (
+            <div className="mb-3 overflow-x-auto last:mb-0">
+              <table className="w-full border-collapse text-sm">
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({ children }) => (
+            <thead className="bg-neutral-50">{children}</thead>
+          ),
+          th: ({ children }) => (
+            <th className="border border-neutral-200 px-3 py-2 text-left font-semibold">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="border border-neutral-200 px-3 py-2 align-top">
+              {children}
+            </td>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
 
 function App() {
   const [conversations, setConversations] = useState<Conversation[]>(() => [
@@ -224,9 +333,13 @@ function App() {
                     <p className="mb-1 text-xs font-medium text-neutral-500">
                       {message.role === "user" ? "You" : "ChatForge"}
                     </p>
-                    <div className="whitespace-pre-wrap text-[15px] leading-relaxed text-neutral-900">
-                      {message.text}
-                    </div>
+                    {message.role === "assistant" ? (
+                      <Markdown content={message.text} />
+                    ) : (
+                      <div className="whitespace-pre-wrap text-[15px] leading-relaxed text-neutral-900">
+                        {message.text}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
