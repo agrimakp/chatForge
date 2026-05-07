@@ -33,6 +33,7 @@ export const chatService = {
         Always use the correct information and data.
         Unless otherwise specified, format time, dates, and numbers in the user's timezone and human readable format.
         Always respond as raw markdown.
+        When referencing any website, resource, or URL, ALWAYS format it as a markdown link using [descriptive text](https://full-url.example) syntax. Never write a raw URL on its own — always wrap it in a markdown link with meaningful link text.
       `,
     });
     conversationRepository.setLastResponseId(conversationId, response.id);
