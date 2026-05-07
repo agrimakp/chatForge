@@ -16,6 +16,37 @@ type Conversation = {
   messages: ChatMessage[];
 };
 
+const STORAGE_KEY = "chatforge:conversations:v1";
+const ACTIVE_KEY = "chatforge:active-id:v1";
+
+function loadConversations(): Conversation[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (c): c is Conversation =>
+        !!c &&
+        typeof (c as Conversation).id === "string" &&
+        typeof (c as Conversation).title === "string" &&
+        Array.isArray((c as Conversation).messages),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function loadActiveId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(ACTIVE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 function Markdown({ content }: { content: string }) {
   return (
     <div className="text-[15px] leading-relaxed text-neutral-900">
@@ -124,16 +155,36 @@ function Markdown({ content }: { content: string }) {
 }
 
 function App() {
-  const [conversations, setConversations] = useState<Conversation[]>(() => [
-    {
-      id: crypto.randomUUID(),
-      title: "New chat",
-      messages: [],
-    },
-  ]);
-  const [activeId, setActiveId] = useState<string>(
-    () => conversations[0]?.id ?? "",
-  );
+  const [conversations, setConversations] = useState<Conversation[]>(() => {
+    const saved = loadConversations();
+    if (saved.length > 0) return saved;
+    return [{ id: crypto.randomUUID(), title: "New chat", messages: [] }];
+  });
+  const [activeId, setActiveId] = useState<string>(() => {
+    const savedActive = loadActiveId();
+    if (savedActive && conversations.some((c) => c.id === savedActive)) {
+      return savedActive;
+    }
+    return conversations[0]?.id ?? "";
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+    } catch {
+      // ignore quota / private mode errors
+    }
+  }, [conversations]);
+
+  useEffect(() => {
+    try {
+      if (activeId) {
+        window.localStorage.setItem(ACTIVE_KEY, activeId);
+      }
+    } catch {
+      // ignore quota / private mode errors
+    }
+  }, [activeId]);
   const [prompt, setPrompt] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
