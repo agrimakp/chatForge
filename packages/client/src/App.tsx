@@ -1,6 +1,15 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
-import { Plus, Send, MessageSquare, User, Sparkles } from "lucide-react";
+import {
+  Plus,
+  Send,
+  MessageSquare,
+  User,
+  Sparkles,
+  Mic,
+  Square,
+  Loader2,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -189,6 +198,13 @@ function App() {
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
 
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
+
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeId),
     [conversations, activeId],
@@ -199,6 +215,17 @@ function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, isSending]);
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current !== null) {
+        window.clearInterval(recordingTimerRef.current);
+      }
+      mediaRecorderRef.current?.stream
+        .getTracks()
+        .forEach((track) => track.stop());
+    };
+  }, []);
 
   const handleNewChat = () => {
     const newId = crypto.randomUUID();
@@ -211,17 +238,14 @@ function App() {
     setPrompt("");
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmedPrompt = prompt.trim();
-    if (!trimmedPrompt || isSending || !activeId) {
-      return;
-    }
+  const sendChatMessage = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || !activeId) return;
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
-      text: trimmedPrompt,
+      text: trimmed,
     };
 
     setConversations((prev) =>
@@ -229,14 +253,12 @@ function App() {
         c.id === activeId
           ? {
               ...c,
-              title:
-                c.messages.length === 0 ? trimmedPrompt.slice(0, 40) : c.title,
+              title: c.messages.length === 0 ? trimmed.slice(0, 40) : c.title,
               messages: [...c.messages, userMessage],
             }
           : c,
       ),
     );
-    setPrompt("");
     setError("");
     setIsSending(true);
 
@@ -245,7 +267,7 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: trimmedPrompt,
+          prompt: trimmed,
           conversationId: activeId,
         }),
       });
@@ -279,6 +301,107 @@ function App() {
     } finally {
       setIsSending(false);
     }
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt || isSending || isRecording || isTranscribing) return;
+    setPrompt("");
+    await sendChatMessage(trimmedPrompt);
+  };
+
+  const transcribeAndSend = async (blob: Blob) => {
+    setIsTranscribing(true);
+    setError("");
+    try {
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": blob.type || "audio/webm" },
+        body: blob,
+      });
+      if (!response.ok) {
+        throw new Error(`Transcription failed with status ${response.status}`);
+      }
+      const data = (await response.json()) as { text?: string };
+      const transcript = (data.text ?? "").trim();
+      if (!transcript) {
+        setError("Couldn't hear anything. Try again.");
+        return;
+      }
+      await sendChatMessage(transcript);
+    } catch (err) {
+      console.error(err);
+      setError("Couldn't transcribe audio. Try again.");
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const startRecording = async () => {
+    if (isRecording || isSending || isTranscribing) return;
+    if (!navigator.mediaDevices || typeof MediaRecorder === "undefined") {
+      setError("Voice recording is not supported in this browser.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : "";
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const type = recorder.mimeType || "audio/webm";
+        const blob = new Blob(audioChunksRef.current, { type });
+        audioChunksRef.current = [];
+        if (blob.size > 0) {
+          void transcribeAndSend(blob);
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      setError("");
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error(err);
+      setError(
+        "Microphone access was denied. Allow it in your browser settings to record.",
+      );
+    }
+  };
+
+  const stopRecording = () => {
+    if (!isRecording) return;
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  };
+
+  const formatRecordingTime = (totalSeconds: number) => {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -425,18 +548,58 @@ function App() {
               onSubmit={handleSubmit}
               className="flex items-end gap-2 rounded-2xl border border-neutral-300 bg-white p-2 shadow-sm transition focus-within:border-neutral-400 focus-within:shadow-md"
             >
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Message ChatForge..."
-                rows={1}
-                className="max-h-48 min-h-10 flex-1 resize-none bg-transparent px-3 py-2 text-[15px] leading-relaxed text-neutral-900 placeholder:text-neutral-400 focus:outline-none"
-                disabled={isSending}
-              />
+              {isRecording ? (
+                <div className="flex flex-1 items-center gap-2 px-3 py-2 text-[15px] text-neutral-700">
+                  <span className="relative flex size-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                    <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+                  </span>
+                  <span>Recording…</span>
+                  <span className="ml-auto font-mono text-sm tabular-nums text-neutral-500">
+                    {formatRecordingTime(recordingSeconds)}
+                  </span>
+                </div>
+              ) : isTranscribing ? (
+                <div className="flex flex-1 items-center gap-2 px-3 py-2 text-[15px] text-neutral-600">
+                  <Loader2 className="size-4 animate-spin" />
+                  <span>Transcribing…</span>
+                </div>
+              ) : (
+                <textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Message ChatForge..."
+                  rows={1}
+                  className="max-h-48 min-h-10 flex-1 resize-none bg-transparent px-3 py-2 text-[15px] leading-relaxed text-neutral-900 placeholder:text-neutral-400 focus:outline-none"
+                  disabled={isSending}
+                />
+              )}
+
+              <button
+                type="button"
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={isSending || isTranscribing}
+                className={`flex size-9 shrink-0 items-center justify-center rounded-xl transition disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-neutral-400 ${
+                  isRecording
+                    ? "bg-red-500 text-white hover:bg-red-600"
+                    : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
+                }`}
+                aria-label={isRecording ? "Stop recording" : "Start recording"}
+                title={isRecording ? "Stop recording" : "Record voice message"}
+              >
+                {isRecording ? (
+                  <Square className="size-4 fill-current" />
+                ) : (
+                  <Mic className="size-4" />
+                )}
+              </button>
+
               <button
                 type="submit"
-                disabled={isSending || !prompt.trim()}
+                disabled={
+                  isSending || isRecording || isTranscribing || !prompt.trim()
+                }
                 className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-neutral-900 text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
                 aria-label="Send message"
               >
