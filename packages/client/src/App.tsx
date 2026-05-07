@@ -9,6 +9,8 @@ import {
   Mic,
   Square,
   Loader2,
+  Volume2,
+  StopCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -54,6 +56,22 @@ function loadActiveId(): string | null {
   } catch {
     return null;
   }
+}
+
+function stripMarkdownForSpeech(markdown: string): string {
+  return markdown
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/(\*|_)(.*?)\1/g, "$2")
+    .replace(/^>\s?/gm, "")
+    .replace(/^[-*+]\s+/gm, "")
+    .replace(/^\d+\.\s+/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function Markdown({ content }: { content: string }) {
@@ -205,6 +223,12 @@ function App() {
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
 
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [loadingMessageId, setLoadingMessageId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCacheRef = useRef<Map<string, string>>(new Map());
+  const synthUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeId),
     [conversations, activeId],
@@ -224,6 +248,13 @@ function App() {
       mediaRecorderRef.current?.stream
         .getTracks()
         .forEach((track) => track.stop());
+      audioRef.current?.pause();
+      audioRef.current = null;
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      audioCacheRef.current.forEach((url) => URL.revokeObjectURL(url));
+      audioCacheRef.current.clear();
     };
   }, []);
 
@@ -404,6 +435,108 @@ function App() {
     return `${minutes}:${seconds.toString().padStart(2, "0")}`;
   };
 
+  const stopPlayback = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    synthUtteranceRef.current = null;
+    setPlayingMessageId(null);
+  };
+
+  const playWithWebSpeech = (messageId: string, text: string) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) {
+      setError("Speech playback isn't supported in this browser.");
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.onend = () => {
+      synthUtteranceRef.current = null;
+      setPlayingMessageId((current) =>
+        current === messageId ? null : current,
+      );
+    };
+    utterance.onerror = () => {
+      synthUtteranceRef.current = null;
+      setPlayingMessageId((current) =>
+        current === messageId ? null : current,
+      );
+    };
+    synthUtteranceRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+    setPlayingMessageId(messageId);
+  };
+
+  const playFromUrl = (messageId: string, url: string, fallbackText: string) =>
+    new Promise<void>((resolve) => {
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => {
+        setPlayingMessageId((current) =>
+          current === messageId ? null : current,
+        );
+        audioRef.current = null;
+        resolve();
+      };
+      audio.onerror = () => {
+        audioRef.current = null;
+        playWithWebSpeech(messageId, fallbackText);
+        resolve();
+      };
+      audio.play().catch(() => {
+        audioRef.current = null;
+        playWithWebSpeech(messageId, fallbackText);
+        resolve();
+      });
+    });
+
+  const togglePlayMessage = async (messageId: string, rawText: string) => {
+    if (playingMessageId === messageId) {
+      stopPlayback();
+      return;
+    }
+    stopPlayback();
+
+    const speechText = stripMarkdownForSpeech(rawText);
+    if (!speechText) return;
+
+    const cachedUrl = audioCacheRef.current.get(messageId);
+    if (cachedUrl) {
+      setPlayingMessageId(messageId);
+      await playFromUrl(messageId, cachedUrl, speechText);
+      return;
+    }
+
+    setLoadingMessageId(messageId);
+    setError("");
+    try {
+      const response = await fetch("/api/speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: speechText }),
+      });
+      if (!response.ok) {
+        throw new Error(`Speech request failed (${response.status})`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      audioCacheRef.current.set(messageId, url);
+      setLoadingMessageId(null);
+      setPlayingMessageId(messageId);
+      await playFromUrl(messageId, url, speechText);
+    } catch (err) {
+      console.error(err);
+      setLoadingMessageId(null);
+      playWithWebSpeech(messageId, speechText);
+    }
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -504,9 +637,39 @@ function App() {
                     )}
                   </div>
                   <div className="min-w-0 flex-1 pt-1">
-                    <p className="mb-1 text-xs font-medium text-neutral-500">
-                      {message.role === "user" ? "You" : "ChatForge"}
-                    </p>
+                    <div className="mb-1 flex items-center gap-2">
+                      <p className="text-xs font-medium text-neutral-500">
+                        {message.role === "user" ? "You" : "ChatForge"}
+                      </p>
+                      {message.role === "assistant" && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            togglePlayMessage(message.id, message.text)
+                          }
+                          disabled={loadingMessageId === message.id}
+                          className="flex size-6 items-center justify-center rounded-md text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          aria-label={
+                            playingMessageId === message.id
+                              ? "Stop playback"
+                              : "Play message"
+                          }
+                          title={
+                            playingMessageId === message.id
+                              ? "Stop playback"
+                              : "Play message"
+                          }
+                        >
+                          {loadingMessageId === message.id ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : playingMessageId === message.id ? (
+                            <StopCircle className="size-3.5" />
+                          ) : (
+                            <Volume2 className="size-3.5" />
+                          )}
+                        </button>
+                      )}
+                    </div>
                     {message.role === "assistant" ? (
                       <Markdown content={message.text} />
                     ) : (
