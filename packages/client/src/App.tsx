@@ -11,6 +11,7 @@ import {
   Loader2,
   Volume2,
   StopCircle,
+  Trash2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -267,6 +268,41 @@ function App() {
     setActiveId(newId);
     setError("");
     setPrompt("");
+  };
+
+  const handleDeleteChat = (id: string) => {
+    const target = conversations.find((c) => c.id === id);
+
+    target?.messages.forEach((m) => {
+      const url = audioCacheRef.current.get(m.id);
+      if (url) {
+        URL.revokeObjectURL(url);
+        audioCacheRef.current.delete(m.id);
+      }
+    });
+
+    if (
+      playingMessageId &&
+      target?.messages.some((m) => m.id === playingMessageId)
+    ) {
+      stopPlayback();
+    }
+
+    const filtered = conversations.filter((c) => c.id !== id);
+    if (filtered.length === 0) {
+      const fresh = {
+        id: crypto.randomUUID(),
+        title: "New chat",
+        messages: [],
+      };
+      setConversations([fresh]);
+      setActiveId(fresh.id);
+    } else {
+      setConversations(filtered);
+      if (activeId === id) {
+        setActiveId(filtered[0].id);
+      }
+    }
   };
 
   const sendChatMessage = async (text: string) => {
@@ -563,21 +599,40 @@ function App() {
             Chats
           </p>
           <ul className="space-y-1">
-            {conversations.map((c) => (
-              <li key={c.id}>
-                <button
-                  onClick={() => setActiveId(c.id)}
-                  className={`flex w-full items-center gap-2 truncate rounded-lg px-3 py-2 text-left text-sm transition ${
-                    c.id === activeId
-                      ? "bg-neutral-800 text-white"
-                      : "text-neutral-300 hover:bg-neutral-800/60"
-                  }`}
-                >
-                  <MessageSquare className="size-4 shrink-0 opacity-70" />
-                  <span className="truncate">{c.title || "New chat"}</span>
-                </button>
-              </li>
-            ))}
+            {conversations.map((c) => {
+              const isActive = c.id === activeId;
+              return (
+                <li key={c.id} className="group relative">
+                  <button
+                    onClick={() => setActiveId(c.id)}
+                    className={`flex w-full items-center gap-2 rounded-lg py-2 pl-3 pr-9 text-left text-sm transition ${
+                      isActive
+                        ? "bg-neutral-800 text-white"
+                        : "text-neutral-300 hover:bg-neutral-800/60"
+                    }`}
+                  >
+                    <MessageSquare className="size-4 shrink-0 opacity-70" />
+                    <span className="truncate">{c.title || "New chat"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleDeleteChat(c.id);
+                    }}
+                    aria-label={`Delete chat ${c.title || "New chat"}`}
+                    title="Delete chat"
+                    className={`absolute right-2 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-neutral-400 transition hover:bg-neutral-700 hover:text-red-300 focus:opacity-100 ${
+                      isActive
+                        ? "opacity-100"
+                        : "opacity-0 group-hover:opacity-100"
+                    }`}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
 
